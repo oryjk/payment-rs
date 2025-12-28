@@ -84,7 +84,7 @@ impl<T: WeChatPayPort, R: PaymentRepositoryPort> PaymentService<T, R> {
         info!("Querying payment: {}", out_order_no);
 
         // 1. 从数据库查询
-        let order = self
+        let mut order = self
             .repository
             .find_by_out_order_no(out_order_no)
             .await?

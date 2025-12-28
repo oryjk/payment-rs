@@ -57,7 +57,7 @@ pub struct NotificationResource {
 
 /// 微信支付端口接口
 #[async_trait]
-pub trait WeChatPayPort: Send + Sync {
+pub trait WeChatPayPort: Send + Sync + Clone {
     /// 创建支付订单（小程序支付）
     async fn create_mini_program_order(
         &self,

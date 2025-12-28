@@ -4,7 +4,7 @@ use async_trait::async_trait;
 
 /// 支付订单仓储端口接口
 #[async_trait]
-pub trait PaymentRepositoryPort: Send + Sync {
+pub trait PaymentRepositoryPort: Send + Sync + Clone {
     /// 保存支付订单
     async fn save(&self, order: &PaymentOrder) -> DomainResult<()>;
 

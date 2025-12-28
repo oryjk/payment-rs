@@ -4,7 +4,7 @@ use axum::{
     Router,
 };
 
-pub fn create_router<T: crate::ports::WeChatPayPort, R: crate::ports::PaymentRepositoryPort>(
+pub fn create_router<T: crate::ports::WeChatPayPort + Clone + 'static, R: crate::ports::PaymentRepositoryPort + Clone + 'static>(
     state: AppState<T, R>,
 ) -> Router {
     Router::new()

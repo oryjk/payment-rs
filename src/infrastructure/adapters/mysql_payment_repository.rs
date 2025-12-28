@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tracing::{debug, error};
 
 /// MySQL支付订单仓储实现
+#[derive(Clone)]
 pub struct MySqlPaymentRepository {
     pool: Arc<Pool<MySql>>,
 }

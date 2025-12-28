@@ -5,26 +5,16 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Json},
 };
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 /// 应用状态
 #[derive(Clone)]
-pub struct AppState<T: crate::ports::WeChatPayPort, R: crate::ports::PaymentRepositoryPort> {
+pub struct AppState<T: crate::ports::WeChatPayPort + Clone + 'static, R: crate::ports::PaymentRepositoryPort + Clone + 'static> {
     pub payment_service: std::sync::Arc<PaymentService<T, R>>,
 }
 
-impl<T: crate::ports::WeChatPayPort, R: crate::ports::PaymentRepositoryPort> Clone
-    for AppState<T, R>
-{
-    fn clone(&self) -> Self {
-        Self {
-            payment_service: self.payment_service.clone(),
-        }
-    }
-}
-
 /// 创建支付订单
-pub async fn create_payment<T: crate::ports::WeChatPayPort, R: crate::ports::PaymentRepositoryPort>(
+pub async fn create_payment<T: crate::ports::WeChatPayPort + Clone + 'static, R: crate::ports::PaymentRepositoryPort + Clone + 'static>(
     State(state): State<AppState<T, R>>,
     Json(request): Json<crate::application::CreatePaymentRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
@@ -39,7 +29,7 @@ pub async fn create_payment<T: crate::ports::WeChatPayPort, R: crate::ports::Pay
             error!("Payment creation error: {}", e);
             let status = match e {
                 crate::domain::errors::DomainError::ValidationError(_) => StatusCode::BAD_REQUEST,
-                crate::domain::errors::InvalidAmount(_) => StatusCode::BAD_REQUEST,
+                crate::domain::errors::DomainError::InvalidAmount(_) => StatusCode::BAD_REQUEST,
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
             };
             (
@@ -53,7 +43,7 @@ pub async fn create_payment<T: crate::ports::WeChatPayPort, R: crate::ports::Pay
 }
 
 /// 查询订单
-pub async fn query_payment<T: crate::ports::WeChatPayPort, R: crate::ports::PaymentRepositoryPort>(
+pub async fn query_payment<T: crate::ports::WeChatPayPort + Clone + 'static, R: crate::ports::PaymentRepositoryPort + Clone + 'static>(
     State(state): State<AppState<T, R>>,
     Path(out_order_no): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
@@ -82,8 +72,8 @@ pub async fn query_payment<T: crate::ports::WeChatPayPort, R: crate::ports::Paym
 
 /// 微信支付回调
 pub async fn wechat_webhook<
-    T: crate::ports::WeChatPayPort,
-    R: crate::ports::PaymentRepositoryPort,
+    T: crate::ports::WeChatPayPort + Clone + 'static,
+    R: crate::ports::PaymentRepositoryPort + Clone + 'static,
 >(
     State(state): State<AppState<T, R>>,
     headers: axum::http::HeaderMap,

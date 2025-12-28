@@ -2,20 +2,23 @@ use crate::domain::errors::{DomainError, DomainResult};
 use crate::infrastructure::config::wechat_config::WeChatPayConfig;
 use crate::ports::wechat_pay_port::*;
 use async_trait::async_trait;
-use hmac::{Hmac, Mac};
+use base64::Engine;
+use hmac::Hmac;
+use rand::rngs::OsRng;
 use reqwest::Client;
 use rsa::pkcs8::DecodePrivateKey;
-use rsa::signature::Signer;
-use rsa::Pkcs1v15Sign;
+use rsa::pkcs1v15::SigningKey;
+use rsa::signature::{RandomizedSigner, SignatureEncoding};
+use rsa::sha2::Digest;
+use rsa::sha2::Sha256;
 use serde_json::json;
-use sha2::Sha256;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error};
 
 type HmacSha256 = Hmac<Sha256>;
 
 /// 微信支付适配器实现
+#[derive(Clone)]
 pub struct WeChatPayAdapter {
     config: Arc<WeChatPayConfig>,
     client: Client,
@@ -44,17 +47,17 @@ impl WeChatPayAdapter {
         let private_key = rsa::RsaPrivateKey::from_pkcs8_pem(&self.config.private_key)
             .map_err(|e| DomainError::CryptoError(format!("Failed to load private key: {}", e)))?;
 
-        // 创建签名器
-        let mut signer =
-            Pkcs1v15Sign::new::<Sha256>(private_key.as_ref());
+        // 计算消息哈希
+        let mut hasher = Sha256::new();
+        hasher.update(message.as_bytes());
+        let hash = hasher.finalize();
 
-        // 签名
-        let signature = signer
-            .sign(message.as_bytes())
-            .to_vec();
+        // 创建签名器并签名
+        let signing_key = SigningKey::<Sha256>::new(private_key);
+        let signature = signing_key.sign_with_rng(&mut OsRng, &hash);
 
         // Base64编码
-        Ok(base64::encode(&signature))
+        Ok(base64::engine::general_purpose::STANDARD.encode(signature.to_bytes()))
     }
 
     /// 生成Authorization头
@@ -87,27 +90,28 @@ impl WeChatPayAdapter {
     fn decrypt_callback_data(
         &self,
         ciphertext: &str,
-        associated_data: &str,
+        _associated_data: &str,
         nonce: &str,
     ) -> DomainResult<String> {
         let key = &self.config.api_v3_key;
 
         // AES-256-GCM解密
         let key_bytes = key.as_bytes();
-        let nonce_bytes = nonce.as_bytes();
-        let ciphertext_bytes = &base64::decode(ciphertext)
+        let ciphertext_bytes = base64::engine::general_purpose::STANDARD.decode(ciphertext)
             .map_err(|e| DomainError::CryptoError(format!("Base64 decode error: {}", e)))?;
 
         // 使用aes-gcm crate进行解密
         use aes_gcm::{
-            aead::{Aead, AeadCore, KeyInit, OsRng},
+            aead::{Aead, KeyInit},
             Aes256Gcm, Nonce,
         };
 
         let cipher_key = Aes256Gcm::new_from_slice(key_bytes)
             .map_err(|e| DomainError::CryptoError(format!("AES init error: {}", e)))?;
 
-        let nonce = Nonce::from_slice(nonce_bytes);
+        let nonce = Nonce::from_slice(nonce.as_bytes());
+
+        // AES-GCM 解密需要处理 aad
         let plaintext = cipher_key
             .decrypt(nonce, ciphertext_bytes.as_ref())
             .map_err(|e| DomainError::CryptoError(format!("Decrypt error: {}", e)))?;
@@ -199,9 +203,16 @@ impl WeChatPayPort for WeChatPayAdapter {
         let private_key = rsa::RsaPrivateKey::from_pkcs8_pem(&self.config.private_key)
             .map_err(|e| DomainError::CryptoError(format!("Failed to load private key: {}", e)))?;
 
-        let mut signer = Pkcs1v15Sign::new::<Sha256>(private_key.as_ref());
-        let signature = signer.sign(message.as_bytes()).to_vec();
-        let pay_sign = base64::encode(&signature);
+        // 计算消息哈希
+        let mut hasher = Sha256::new();
+        hasher.update(message.as_bytes());
+        let hash = hasher.finalize();
+
+        // 创建签名器并签名
+        let signing_key = SigningKey::<Sha256>::new(private_key);
+        let signature = signing_key.sign_with_rng(&mut OsRng, &hash);
+
+        let pay_sign = base64::engine::general_purpose::STANDARD.encode(signature.to_bytes());
 
         Ok(MiniProgramPayParams {
             time_stamp: timestamp,
@@ -262,7 +273,7 @@ impl WeChatPayPort for WeChatPayAdapter {
         let body_str = body.to_string();
 
         let authorization =
-            self.build_authorization("POST", &url.replace(self.config.base_url, ""), &body_str)?;
+            self.build_authorization("POST", &url.replace(&self.config.base_url, ""), &body_str)?;
 
         let response = self
             .client
